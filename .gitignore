@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment Variables - CREDENTIALS!
+.env
+.env.local
+.env.development
+.env.production
+backend/.env
+blockchain/.env
+frontend/.env
+
+# Build & Cache
+blockchain/cache/
+blockchain/artifacts/
+frontend/build/
+frontend/dist/
+
+# Deployment Files
+deployment.json
+backend/deployment.json
+blockchain/deployment.json
+
+# Logs & Uploads
+*.log
+backend/logs/
+backend/uploads/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+.vscode/
+.idea/
+*.swp
+*.swo
