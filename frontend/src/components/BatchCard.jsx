@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Package, User, MapPin, Weight, Calendar, Hash, TrendingUp } from 'lucide-react';
+import { Package, User, MapPin, Weight, Calendar, Hash, TrendingUp, ExternalLink, Navigation } from 'lucide-react';
 
 const BatchCard = ({ batch, onViewDetails, index = 0 }) => {
   /**
@@ -32,6 +32,20 @@ const BatchCard = ({ batch, onViewDetails, index = 0 }) => {
       consumer: 'bg-gray-100 text-gray-800 border-gray-200'
     };
     return colors[role] || 'bg-gray-100 text-gray-800 border-gray-200';
+  };
+
+  const latestGpsPoint = batch?.gpsTracking?.length
+    ? batch.gpsTracking[batch.gpsTracking.length - 1]
+    : null;
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   /**
@@ -169,6 +183,56 @@ const BatchCard = ({ batch, onViewDetails, index = 0 }) => {
             <Calendar className="w-3 h-3 text-gray-400" />
             <span>{formatDate(batch.timestamp)}</span>
           </div>
+        </div>
+
+        {/* Live Transport GPS Tracking */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-blue-900 flex items-center">
+              <Navigation className="w-3 h-3 mr-1" />
+              Transport Status: {batch.status || 'In Transit'}
+            </p>
+          </div>
+
+          {latestGpsPoint ? (
+            <>
+              <p className="text-xs text-blue-800">
+                Current Location:
+              </p>
+              <p className="text-xs text-gray-700">
+                Latitude: {Number(latestGpsPoint.latitude).toFixed(5)}
+              </p>
+              <p className="text-xs text-gray-700">
+                Longitude: {Number(latestGpsPoint.longitude).toFixed(5)}
+              </p>
+              <p className="text-xs text-gray-500">
+                Last Updated: {formatDateTime(latestGpsPoint.timestamp)}
+              </p>
+
+              <a
+                href={`https://www.google.com/maps?q=${latestGpsPoint.latitude},${latestGpsPoint.longitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center text-xs font-semibold text-blue-700 hover:text-blue-900"
+                onClick={(e) => e.stopPropagation()}
+              >
+                View on Map 🌍
+                <ExternalLink className="w-3 h-3 ml-1" />
+              </a>
+
+              <iframe
+                title={`live-map-${batch.batchId}`}
+                src={`https://maps.google.com/maps?q=${latestGpsPoint.latitude},${latestGpsPoint.longitude}&z=15&output=embed`}
+                width="100%"
+                height="200"
+                className="rounded-lg border border-blue-100"
+                loading="lazy"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </>
+          ) : (
+            <p className="text-xs text-gray-500">Live GPS not available yet.</p>
+          )}
         </div>
 
         {/* Action Indicator */}

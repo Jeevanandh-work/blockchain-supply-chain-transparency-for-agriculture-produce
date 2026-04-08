@@ -10,6 +10,18 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api
 // Configure axios defaults
 axios.defaults.baseURL = API_BASE_URL;
 
+// Ensure token is attached even after reloads or axios default resets.
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers = config.headers || {};
+    if (!config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 /**
  * Set authorization token for authenticated requests
  * @param {string} token - JWT token
@@ -73,12 +85,27 @@ export const batchAPI = {
    * @param {string} message - Transfer message/notes
    * @returns {Promise} Transfer confirmation
    */
-  transferBatch: async (batchId, toAddress, message = 'Batch transferred') => {
+  transferBatch: async (batchId, toAddress, message = 'Batch transferred', deliveryAddress, transportDetails) => {
     try {
       const response = await axios.post('/batch/transfer', {
         batchId,
         toAddress,
-        message
+        message,
+        deliveryAddress,
+        transportDetails
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  retailerDecision: async (batchId, action, notes = '') => {
+    try {
+      const response = await axios.post('/batch/retailer/decision', {
+        batchId,
+        action,
+        notes,
       });
       return response.data;
     } catch (error) {
@@ -102,7 +129,56 @@ export const batchAPI = {
     } catch (error) {
       throw error.response?.data || error.message;
     }
-  }
+  },
+
+  /**
+   * Update quantity sold by distributor
+   * @param {string} batchId - Batch identifier
+   * @param {number} quantitySold - Sold quantity
+   * @returns {Promise} Updated quantity details
+   */
+  updateQuantitySold: async (batchId, quantitySold) => {
+    try {
+      const response = await axios.patch('/batch/sales', {
+        batchId,
+        quantitySold,
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  createPaymentOrder: async (batchId, stage, amount) => {
+    try {
+      const response = await axios.post('/batch/payment/order', {
+        batchId,
+        stage,
+        amount,
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  verifyPayment: async (payload) => {
+    try {
+      const response = await axios.post('/batch/payment/verify', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  getPaymentHistory: async () => {
+    try {
+      const response = await axios.get('/batch/payment/history');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
 };
 
 /**
@@ -169,6 +245,33 @@ export const userAPI = {
     } catch (error) {
       throw error.response?.data || error.message;
     }
+  },
+
+  /**
+   * Get current authenticated user profile
+   * @returns {Promise} User profile data
+   */
+  getProfile: async () => {
+    try {
+      const response = await axios.get('/user/profile');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  /**
+   * Update current authenticated user profile
+   * @param {Object} profileData - Profile payload
+   * @returns {Promise} Updated profile data
+   */
+  updateProfile: async (profileData) => {
+    try {
+      const response = await axios.put('/user/profile', profileData);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
   }
 };
 
@@ -184,6 +287,20 @@ export const transportAPI = {
   updateStatus: async (statusData) => {
     try {
       const response = await axios.post('/batch/transport/status', statusData);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  /**
+   * Update live transport location
+   * @param {Object} locationData - Batch and coordinates
+   * @returns {Promise} Location update response
+   */
+  updateLocation: async (locationData) => {
+    try {
+      const response = await axios.post('/batch/transport/location', locationData);
       return response.data;
     } catch (error) {
       throw error.response?.data || error.message;

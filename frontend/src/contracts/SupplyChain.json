@@ -199,6 +199,37 @@
       "type": "event"
     },
     {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "batchId",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "assignedBy",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "transporter",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "TransporterAssigned",
+      "type": "event"
+    },
+    {
       "inputs": [
         {
           "internalType": "address",
@@ -212,6 +243,24 @@
         }
       ],
       "name": "assignRole",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "_batchId",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "_transporter",
+          "type": "address"
+        }
+      ],
+      "name": "assignTransporter",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -513,6 +562,40 @@
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "_batchId",
+          "type": "string"
+        }
+      ],
+      "name": "getTransportAssignment",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "transporter",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "assignedBy",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "assignedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "exists",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "owner",
       "outputs": [
@@ -598,6 +681,40 @@
       "name": "transferBatch",
       "outputs": [],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "name": "transportAssignments",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "transporter",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "assignedBy",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "assignedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "exists",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {

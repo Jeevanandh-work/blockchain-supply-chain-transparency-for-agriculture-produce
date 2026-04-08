@@ -28,12 +28,20 @@ contract SupplyChain {
         address recordedBy;
         uint256 timestamp;
     }
+
+    struct TransportAssignment {
+        address transporter;
+        address assignedBy;
+        uint256 assignedAt;
+        bool exists;
+    }
     
     // Mappings
     mapping(string => Batch) public batches;
     mapping(address => Role) public userRoles;
     mapping(string => QualityRecord[]) public qualityRecords;
     mapping(string => address[]) public batchHistory;
+    mapping(string => TransportAssignment) public transportAssignments;
     
     // Arrays
     string[] public batchIds;
@@ -85,6 +93,13 @@ contract SupplyChain {
         string recipientName,
         uint256 timestamp
     );
+
+    event TransporterAssigned(
+        string indexed batchId,
+        address indexed assignedBy,
+        address indexed transporter,
+        uint256 timestamp
+    );
     
     // ============ Modifiers ============
     
@@ -106,6 +121,11 @@ contract SupplyChain {
             role == Role.Retailer,
             "Only distributor, transport, or retailer can transfer"
         );
+        _;
+    }
+
+    modifier onlyDistributor() {
+        require(userRoles[msg.sender] == Role.Distributor, "Only distributors can perform this action");
         _;
     }
     
@@ -205,6 +225,34 @@ contract SupplyChain {
         batchHistory[_batchId].push(_to);
         
         emit BatchTransferred(_batchId, previousOwner, _to, _updateMsg, block.timestamp);
+    }
+
+    /**
+     * @dev Assign a transporter to a batch without transferring ownership
+     * @param _batchId ID of the batch to assign
+     * @param _transporter Address of the transporter
+     */
+    function assignTransporter(
+        string memory _batchId,
+        address _transporter
+    ) external onlyDistributor batchExists(_batchId) {
+        require(_transporter != address(0), "Invalid transporter address");
+        require(userRoles[_transporter] == Role.Transport, "Transporter must have transport role");
+
+        Batch storage batch = batches[_batchId];
+        require(batch.currentOwner == msg.sender, "Only the current distributor owner can assign a transporter");
+
+        transportAssignments[_batchId] = TransportAssignment({
+            transporter: _transporter,
+            assignedBy: msg.sender,
+            assignedAt: block.timestamp,
+            exists: true
+        });
+
+        batch.updatedAt = block.timestamp;
+        batch.statusUpdates.push("Transporter assigned");
+
+        emit TransporterAssigned(_batchId, msg.sender, _transporter, block.timestamp);
     }
     
     /**
@@ -365,6 +413,34 @@ contract SupplyChain {
         returns (QualityRecord[] memory) 
     {
         return qualityRecords[_batchId];
+    }
+
+    /**
+     * @dev Get assigned transporter details for a batch
+     * @param _batchId ID of the batch
+     * @return transporter Assigned transporter address
+     * @return assignedBy Address that assigned the transporter
+     * @return assignedAt Assignment timestamp
+     * @return exists Whether a transporter assignment exists
+     */
+    function getTransportAssignment(string memory _batchId)
+        external
+        view
+        batchExists(_batchId)
+        returns (
+            address transporter,
+            address assignedBy,
+            uint256 assignedAt,
+            bool exists
+        )
+    {
+        TransportAssignment storage assignment = transportAssignments[_batchId];
+        return (
+            assignment.transporter,
+            assignment.assignedBy,
+            assignment.assignedAt,
+            assignment.exists
+        );
     }
     
     /**

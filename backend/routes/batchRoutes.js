@@ -28,12 +28,28 @@ router.post(
   batchController.recordQuality
 );
 
+// Update quantity sold (Distributor only)
+router.patch(
+  '/sales',
+  protect,
+  authorize('Distributor'),
+  batchController.updateQuantitySold
+);
+
 // Update transport status (Transport only)
 router.post(
   '/transport/status',
   protect,
   authorize('Transport'),
   batchController.updateTransportStatus
+);
+
+// Update live transport GPS location (Transport only)
+router.post(
+  '/transport/location',
+  protect,
+  authorize('Transport'),
+  batchController.updateTransportLocation
 );
 
 // Confirm delivery (Transport only)
@@ -43,6 +59,33 @@ router.post(
   authorize('Transport'),
   batchController.confirmDelivery
 );
+
+// Retailer batch decision (Retailer only)
+router.post(
+  '/retailer/decision',
+  protect,
+  authorize('Retailer'),
+  batchController.retailerDecision
+);
+
+// Create payment order (Distributor and Retailer)
+router.post(
+  '/payment/order',
+  protect,
+  authorize('Distributor', 'Retailer'),
+  batchController.createPaymentOrder
+);
+
+// Verify payment (Distributor and Retailer)
+router.post(
+  '/payment/verify',
+  protect,
+  authorize('Distributor', 'Retailer'),
+  batchController.verifyPayment
+);
+
+// Payment history for current user
+router.get('/payment/history', protect, batchController.getPaymentHistory);
 
 // Get batch GPS tracking (Public)
 router.get('/:id/tracking', batchController.getBatchTracking);

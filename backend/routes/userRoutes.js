@@ -9,6 +9,9 @@ router.get('/', protect, userController.getAllUsers);
 // Get users by role
 router.get('/role/:role', protect, userController.getUsersByRole);
 
+// Get current user profile
+router.get('/profile', protect, userController.getProfile);
+
 // Get user by wallet address
 router.get('/wallet/:address', protect, userController.getUserByWallet);
 

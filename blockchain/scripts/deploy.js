@@ -2,6 +2,25 @@ const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
+function updateEnvFile(filePath, key, value) {
+  const line = `${key}=${value}`;
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, `${line}\n`);
+    return;
+  }
+
+  const current = fs.readFileSync(filePath, 'utf8');
+  const matcher = new RegExp(`^${key}=.*$`, 'm');
+
+  if (matcher.test(current)) {
+    fs.writeFileSync(filePath, current.replace(matcher, line));
+  } else {
+    const trimmed = current.endsWith('\n') ? current : `${current}\n`;
+    fs.writeFileSync(filePath, `${trimmed}${line}\n`);
+  }
+}
+
 async function main() {
   console.log("🚀 Deploying SupplyChain contract...\n");
 
@@ -66,6 +85,13 @@ async function main() {
     }, null, 2)
   );
   console.log(`💾 Contract ABI copied to ${frontendABIPath}\n`);
+
+  // Update environment files with deployed address
+  const backendEnvPath = path.join(__dirname, '../../backend/.env');
+  const frontendEnvPath = path.join(__dirname, '../../frontend/.env');
+  updateEnvFile(backendEnvPath, 'CONTRACT_ADDRESS', address);
+  updateEnvFile(frontendEnvPath, 'REACT_APP_CONTRACT_ADDRESS', address);
+  console.log(`💾 Environment files updated with deployed address\n`);
   
   // Assign test roles for localhost development
   if (hre.network.name === "localhost" || hre.network.name === "hardhat") {

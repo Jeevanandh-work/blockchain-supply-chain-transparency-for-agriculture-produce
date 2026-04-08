@@ -289,6 +289,21 @@ class BlockchainService {
       }
 
       const batch = await this.contract.getBatch(batchId);
+      let transportAssignment = null;
+
+      try {
+        if (typeof this.contract.getTransportAssignment === 'function') {
+          const assignment = await this.contract.getTransportAssignment(batchId);
+          transportAssignment = {
+            transporter: assignment[0],
+            assignedBy: assignment[1],
+            assignedAt: Number(assignment[2]),
+            exists: assignment[3],
+          };
+        }
+      } catch (error) {
+        console.warn('⚠️  Could not load transport assignment:', error.message);
+      }
 
       return {
         batchId: batch[0],
@@ -298,6 +313,7 @@ class BlockchainService {
         statusUpdates: batch[4],
         createdAt: Number(batch[5]),
         updatedAt: Number(batch[6]),
+        transportAssignment,
         verified: true,
       };
     } catch (error) {

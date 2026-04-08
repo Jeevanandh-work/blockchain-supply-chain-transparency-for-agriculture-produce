@@ -1,8 +1,85 @@
 const Batch = require('../models/Batch');
 const User = require('../models/User');
+const crypto = require('crypto');
 const blockchainService = require('../services/blockchainService');
 const ipfsService = require('../services/ipfsService');
 const qrService = require('../services/qrService');
+
+let Razorpay = null;
+try {
+  Razorpay = require('razorpay');
+} catch (error) {
+  Razorpay = null;
+}
+
+const PAYMENT_STAGE_CONFIG = {
+  farmer: { payerRoles: ['Distributor'], payeeRole: 'Farmer' },
+  transport: { payerRoles: ['Distributor'], payeeRole: 'Transport' },
+  distributor: { payerRoles: ['Retailer'], payeeRole: 'Distributor' },
+};
+
+const PAYMENT_SEQUENCE_BLOCK_MESSAGE = 'Complete previous payments before proceeding';
+
+const isPaid = (batch, stage) => String(batch?.payments?.[stage]?.status || '').toLowerCase() === 'paid';
+
+const validatePaymentSequence = (batch, stage) => {
+  if (stage === 'transport' && !isPaid(batch, 'farmer')) {
+    return PAYMENT_SEQUENCE_BLOCK_MESSAGE;
+  }
+
+  return '';
+};
+
+const getRazorpayClient = () => {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret || !Razorpay) {
+    return null;
+  }
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+};
+
+const resolveStageRecipient = async (batch, stage) => {
+  if (stage === 'farmer') {
+    const farmerUser = await User.findById(batch.farmer);
+    return farmerUser || null;
+  }
+
+  if (stage === 'transport') {
+    if (String(batch.currentOwnerRole || '').toLowerCase() === 'transport' && batch.currentOwner) {
+      const currentTransport = await User.findById(batch.currentOwner);
+      if (currentTransport) return currentTransport;
+    }
+
+    const transportEvent = [...(batch.statusHistory || [])]
+      .reverse()
+      .find((entry) => String(entry?.updatedBy?.role || '').toLowerCase() === 'transport');
+
+    if (transportEvent?.updatedBy?._id) {
+      const transportUser = await User.findById(transportEvent.updatedBy._id);
+      if (transportUser) return transportUser;
+    }
+    return null;
+  }
+
+  if (stage === 'distributor') {
+    if (String(batch.currentOwnerRole || '').toLowerCase() === 'distributor' && batch.currentOwner) {
+      const currentDistributor = await User.findById(batch.currentOwner);
+      if (currentDistributor) return currentDistributor;
+    }
+
+    const distributorEvent = [...(batch.statusHistory || [])]
+      .reverse()
+      .find((entry) => String(entry?.updatedBy?.role || '').toLowerCase() === 'distributor');
+
+    if (distributorEvent?.updatedBy?._id) {
+      const distributorUser = await User.findById(distributorEvent.updatedBy._id);
+      if (distributorUser) return distributorUser;
+    }
+  }
+
+  return null;
+};
 
 /**
  * @desc    Create new batch
@@ -11,7 +88,7 @@ const qrService = require('../services/qrService');
  */
 exports.createBatch = async (req, res) => {
   try {
-    const { batchId, productName, quantity, unit, metadata } = req.body;
+    const { batchId, productName, quantity, unit, price, metadata } = req.body;
     const farmer = req.user;
 
     // Check if batch already exists
@@ -29,6 +106,7 @@ exports.createBatch = async (req, res) => {
       productName,
       quantity,
       unit,
+      price: Number(price || 0),
       farmer: {
         name: farmer.name,
         walletAddress: farmer.walletAddress,
@@ -70,6 +148,7 @@ exports.createBatch = async (req, res) => {
       batchId,
       productName,
       quantity,
+      price: Number(price || 0),
       unit,
       farmer: farmer._id,
       currentOwner: farmer._id,
@@ -79,6 +158,20 @@ exports.createBatch = async (req, res) => {
       qrCodeUrl,
       blockchainTxHash: blockchainTx.transactionHash,
       status: 'Created',
+      payments: {
+        farmer: {
+          status: 'Pending',
+          amount: Number(price || 0),
+        },
+        transport: {
+          status: 'Pending',
+          amount: Number(price || 0) * 0.15,
+        },
+        distributor: {
+          status: 'Pending',
+          amount: Number(price || 0),
+        },
+      },
       statusHistory: [
         {
           status: 'Created',
@@ -115,7 +208,7 @@ exports.createBatch = async (req, res) => {
  */
 exports.transferBatch = async (req, res) => {
   try {
-    const { batchId, toAddress, message } = req.body;
+    const { batchId, toAddress, message, deliveryAddress, transportDetails } = req.body;
     const currentUser = req.user;
 
     // Find batch
@@ -127,8 +220,31 @@ exports.transferBatch = async (req, res) => {
       });
     }
 
-    // Verify current owner
-    if (batch.currentOwner._id.toString() !== currentUser._id.toString()) {
+    const currentRole = String(batch.currentOwnerRole || batch.currentOwner?.role || '').toLowerCase();
+    const requesterRole = String(currentUser.role || '').toLowerCase();
+    const isActualOwner = batch.currentOwner._id.toString() === currentUser._id.toString();
+    const isDistributorWorkflowTransfer =
+      requesterRole === 'distributor' && (currentRole === 'farmer' || currentRole === 'distributor');
+    const isRetailerWorkflowTransfer =
+      requesterRole === 'retailer' &&
+      (
+        currentRole === 'transport' ||
+        currentRole === 'distributor' ||
+        currentRole === 'farmer' ||
+        String(batch.status || '').toLowerCase().includes('picked') ||
+        String(batch.status || '').toLowerCase().includes('transit')
+      );
+
+    // Prevent transfers once delivery is already completed.
+    if (['delivered', 'completed', 'final delivery'].includes(String(batch.status || '').toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'This batch is already delivered/completed and cannot be transferred',
+      });
+    }
+
+    // Verify ownership/authorization for transfer
+    if (!isActualOwner && !isDistributorWorkflowTransfer && !isRetailerWorkflowTransfer) {
       return res.status(403).json({
         success: false,
         message: 'You are not the current owner of this batch',
@@ -166,9 +282,29 @@ exports.transferBatch = async (req, res) => {
     // Update database
     batch.currentOwner = recipient._id;
     batch.currentOwnerRole = recipient.role;
-    batch.status = 'In Transit';
+
+    if (recipient.role === 'Retailer') {
+      batch.status = 'Accepted by Retailer';
+    } else {
+      batch.status = 'In Transit';
+    }
+
+    if (deliveryAddress) {
+      batch.deliveryAddress = deliveryAddress;
+    }
+
+    if (transportDetails && typeof transportDetails === 'object') {
+      batch.transportDetails = {
+        vehicleNumber: transportDetails.vehicleNumber || batch.transportDetails?.vehicleNumber || '',
+        driverName: transportDetails.driverName || batch.transportDetails?.driverName || '',
+        transportCompany: transportDetails.transportCompany || batch.transportDetails?.transportCompany || '',
+        contactNumber: transportDetails.contactNumber || batch.transportDetails?.contactNumber || '',
+      };
+    }
+
+    const statusLabel = recipient.role === 'Retailer' ? 'Accepted by Retailer' : 'In Transit';
     batch.statusHistory.push({
-      status: 'In Transit',
+      status: statusLabel,
       message,
       blockchainHash: blockchainTx.transactionHash,
       updatedBy: currentUser._id,
@@ -286,9 +422,9 @@ exports.getBatch = async (req, res) => {
 
     // Get from database
     const batch = await Batch.findOne({ batchId: id })
-      .populate('farmer', 'name email walletAddress organization')
-      .populate('currentOwner', 'name email walletAddress role')
-      .populate('statusHistory.updatedBy', 'name role')
+      .populate('farmer', 'name email walletAddress organization phoneNumber farmerProfile')
+      .populate('currentOwner', 'name email walletAddress role organization phoneNumber')
+      .populate('statusHistory.updatedBy', 'name role organization phoneNumber walletAddress')
       .populate('qualityRecords.recordedBy', 'name role');
 
     if (!batch) {
@@ -348,25 +484,22 @@ exports.getAllBatches = async (req, res) => {
       // Farmers see their own batches
       query = { farmer: req.user._id };
     } else if (userRole === 'Distributor') {
-      // Distributors see batches from Farmers (available to pick up)
+      // Distributors see batches from Farmers and Transport (for live tracking)
       query = { 
         $or: [
           { currentOwnerRole: 'Farmer' },
+          { currentOwnerRole: 'Transport' },
           { currentOwner: req.user._id }
         ]
       };
     } else if (userRole === 'Transport') {
-      // Transport sees batches from Distributors
-      query = { 
-        $or: [
-          { currentOwnerRole: 'Distributor' },
-          { currentOwner: req.user._id }
-        ]
-      };
+      // Transport sees ALL batches (comprehensive dashboard view)
+      query = {};  // Show all batches for transport dashboard
     } else if (userRole === 'Retailer') {
       // Retailers see batches from Transport
       query = { 
         $or: [
+          { currentOwnerRole: 'Distributor' },
           { currentOwnerRole: 'Transport' },
           { currentOwner: req.user._id }
         ]
@@ -374,8 +507,9 @@ exports.getAllBatches = async (req, res) => {
     }
 
     const batches = await Batch.find(query)
-      .populate('farmer', 'name organization walletAddress')
-      .populate('currentOwner', 'name role walletAddress')
+      .populate('farmer', 'name organization walletAddress phoneNumber email farmerProfile')
+      .populate('currentOwner', 'name role walletAddress phoneNumber email organization')
+      .populate('statusHistory.updatedBy', 'name role phoneNumber email organization walletAddress')
       .sort({ createdAt: -1 });
 
     console.log(`📦 Fetching batches for ${userRole}: ${batches.length} found`);
@@ -391,6 +525,145 @@ exports.getAllBatches = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get batches',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Update quantity sold for a batch
+ * @route   PATCH /api/batch/sales
+ * @access  Private (Distributor only)
+ */
+exports.updateQuantitySold = async (req, res) => {
+  try {
+    const { batchId, quantitySold } = req.body;
+    const distributor = req.user;
+
+    if (distributor.role !== 'Distributor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only Distributor users can update quantity sold',
+      });
+    }
+
+    if (!batchId || quantitySold === undefined || quantitySold === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch ID and quantity sold are required',
+      });
+    }
+
+    const batch = await Batch.findOne({ batchId });
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        message: 'Batch not found',
+      });
+    }
+
+    const numericQuantitySold = Number(quantitySold);
+    if (!Number.isFinite(numericQuantitySold) || numericQuantitySold < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity sold must be a valid non-negative number',
+      });
+    }
+
+    if (numericQuantitySold > batch.quantity) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity sold cannot exceed total quantity',
+      });
+    }
+
+    batch.quantitySold = numericQuantitySold;
+    batch.statusHistory.push({
+      status: batch.status,
+      location: batch.location,
+      message: `Distributor updated sold quantity to ${numericQuantitySold} ${batch.unit}`,
+      updatedBy: distributor._id,
+    });
+
+    await batch.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Quantity sold updated successfully',
+      data: {
+        batchId: batch.batchId,
+        quantity: batch.quantity,
+        quantitySold: batch.quantitySold,
+        quantityRemaining: Math.max(batch.quantity - batch.quantitySold, 0),
+      },
+    });
+  } catch (error) {
+    console.error('Update quantity sold error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update quantity sold',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Update live transport location for a batch
+ * @route   POST /api/batch/transport/location
+ * @access  Private (Transport only)
+ */
+exports.updateTransportLocation = async (req, res) => {
+  try {
+    const { batchId, coordinates, location } = req.body;
+    const transport = req.user;
+
+    if (!batchId || !coordinates || coordinates.latitude === undefined || coordinates.longitude === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch ID and coordinates are required',
+      });
+    }
+
+    if (transport.role !== 'Transport') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only Transport users can update live location',
+      });
+    }
+
+    const batch = await Batch.findOne({ batchId });
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        message: 'Batch not found',
+      });
+    }
+
+    batch.location = location || batch.location || 'In Transit';
+    batch.gpsTracking = batch.gpsTracking || [];
+    batch.gpsTracking.push({
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
+      location: location || batch.location || 'In Transit',
+      timestamp: new Date(),
+    });
+
+    await batch.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Live location updated',
+      data: {
+        batchId: batch.batchId,
+        lastLocation: batch.location,
+        gpsPoint: batch.gpsTracking[batch.gpsTracking.length - 1],
+      },
+    });
+  } catch (error) {
+    console.error('Update transport location error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update live location',
       error: error.message,
     });
   }
@@ -428,14 +701,96 @@ exports.getMyBatches = async (req, res) => {
 };
 
 /**
+ * @desc    Retailer decision on incoming batch
+ * @route   POST /api/batch/retailer/decision
+ * @access  Private (Retailer)
+ */
+exports.retailerDecision = async (req, res) => {
+  try {
+    const { batchId, action, notes } = req.body;
+    const retailer = req.user;
+
+    if (!batchId || !action) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch ID and action are required',
+      });
+    }
+
+    const normalizedAction = String(action).toLowerCase();
+    if (!['accept', 'reject'].includes(normalizedAction)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be accept or reject',
+      });
+    }
+
+    const batch = await Batch.findOne({ batchId });
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        message: 'Batch not found',
+      });
+    }
+
+    const currentRole = String(batch.currentOwnerRole || '').toLowerCase();
+    if (!['transport', 'distributor', 'retailer'].includes(currentRole)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch is not in a retailer decision stage',
+      });
+    }
+
+    if (normalizedAction === 'accept') {
+      batch.currentOwner = retailer._id;
+      batch.currentOwnerRole = 'Retailer';
+      batch.status = 'Accepted by Retailer';
+    } else {
+      batch.status = 'Rejected by Retailer';
+    }
+
+    batch.statusHistory.push({
+      status: batch.status,
+      message: notes || `Batch ${normalizedAction}ed by retailer`,
+      updatedBy: retailer._id,
+    });
+
+    await batch.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Batch ${normalizedAction}ed successfully`,
+      data: batch,
+    });
+  } catch (error) {
+    console.error('Retailer decision error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update retailer decision',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * @desc    Update transport status
  * @route   POST /api/batch/transport/status
  * @access  Private (Transport only)
  */
 exports.updateTransportStatus = async (req, res) => {
   try {
-    const { batchId, status, location, notes, coordinates } = req.body;
+    const { batchId, status, location, notes, coordinates, dispatchTime, expectedDelivery } = req.body;
     const transport = req.user;
+
+    console.log('📦 Update Transport Status Request:', {
+      batchId,
+      status,
+      location,
+      dispatchTime,
+      expectedDelivery,
+      notes,
+      coordinates,
+    });
 
     // Validate required fields
     if (!batchId || !status || !location) {
@@ -457,14 +812,11 @@ exports.updateTransportStatus = async (req, res) => {
       });
     }
 
-    // Verify transport is current owner or authorized
-    if (
-      batch.currentOwner._id.toString() !== transport._id.toString() &&
-      transport.role !== 'Transport'
-    ) {
+    // Verify user has Transport role (Transport can update any batch)
+    if (transport.role !== 'Transport') {
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to update this batch',
+        message: 'Only Transport users can update transport status',
       });
     }
 
@@ -488,8 +840,22 @@ exports.updateTransportStatus = async (req, res) => {
     batch.status = status;
     batch.location = location;
     
+    // Update dispatch and delivery times if provided
+    if (dispatchTime) {
+      batch.dispatchTime = new Date(dispatchTime);
+      console.log('✅ Dispatch time set:', batch.dispatchTime);
+    }
+    if (expectedDelivery) {
+      batch.expectedDelivery = new Date(expectedDelivery);
+      console.log('✅ Expected delivery time set:', batch.expectedDelivery);
+    }
+    
     // Add GPS coordinates if provided
-    if (coordinates && coordinates.latitude && coordinates.longitude) {
+    if (
+      coordinates &&
+      coordinates.latitude !== undefined &&
+      coordinates.longitude !== undefined
+    ) {
       batch.gpsTracking = batch.gpsTracking || [];
       batch.gpsTracking.push({
         latitude: coordinates.latitude,
@@ -497,6 +863,7 @@ exports.updateTransportStatus = async (req, res) => {
         location: location,
         timestamp: new Date(),
       });
+      console.log('📍 GPS tracking point added for batch:', batchId);
     }
 
     // Add to status history
@@ -510,6 +877,13 @@ exports.updateTransportStatus = async (req, res) => {
 
     await batch.save();
 
+    console.log('✅ Batch updated successfully:', {
+      batchId: batch.batchId,
+      status: batch.status,
+      dispatchTime: batch.dispatchTime,
+      expectedDelivery: batch.expectedDelivery,
+    });
+
     res.status(200).json({
       success: true,
       message: 'Transport status updated successfully',
@@ -519,7 +893,7 @@ exports.updateTransportStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Update transport status error:', error);
+    console.error('❌ Update transport status error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update transport status',
@@ -541,6 +915,7 @@ exports.confirmDelivery = async (req, res) => {
       signature,
       notes,
       location,
+      coordinates,
       proofImage,
     } = req.body;
     const transport = req.user;
@@ -620,6 +995,20 @@ exports.confirmDelivery = async (req, res) => {
       deliveredAt: new Date(),
     };
 
+    if (
+      coordinates &&
+      coordinates.latitude !== undefined &&
+      coordinates.longitude !== undefined
+    ) {
+      batch.gpsTracking = batch.gpsTracking || [];
+      batch.gpsTracking.push({
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        location,
+        timestamp: new Date(),
+      });
+    }
+
     // Add to status history
     batch.statusHistory.push({
       status: 'Delivered',
@@ -688,5 +1077,256 @@ exports.getBatchTracking = async (req, res) => {
       message: 'Failed to get batch tracking',
       error: error.message,
     });
+  }
+};
+
+/**
+ * @desc    Create payment order for stage payment
+ * @route   POST /api/batch/payment/order
+ * @access  Private (Distributor, Retailer)
+ */
+exports.createPaymentOrder = async (req, res) => {
+  try {
+    const { batchId, stage, amount } = req.body;
+    const payer = req.user;
+
+    if (!batchId || !stage) {
+      return res.status(400).json({ success: false, message: 'Batch ID and stage are required' });
+    }
+
+    const normalizedStage = String(stage).toLowerCase();
+    const config = PAYMENT_STAGE_CONFIG[normalizedStage];
+    if (!config) {
+      return res.status(400).json({ success: false, message: 'Invalid payment stage' });
+    }
+
+    if (!config.payerRoles.includes(payer.role)) {
+      return res.status(403).json({ success: false, message: `${payer.role} cannot initiate ${normalizedStage} payment` });
+    }
+
+    const batch = await Batch.findOne({ batchId })
+      .populate('statusHistory.updatedBy', 'name role walletAddress')
+      .populate('farmer', 'name role walletAddress')
+      .populate('currentOwner', 'name role walletAddress');
+
+    if (!batch) {
+      return res.status(404).json({ success: false, message: 'Batch not found' });
+    }
+
+    const recipient = await resolveStageRecipient(batch, normalizedStage);
+    if (!recipient) {
+      return res.status(400).json({ success: false, message: `No ${config.payeeRole} found for this batch` });
+    }
+
+    const sequenceError = validatePaymentSequence(batch, normalizedStage);
+    if (sequenceError) {
+      return res.status(400).json({ success: false, message: sequenceError });
+    }
+
+    const existingStagePayment = batch.payments?.[normalizedStage] || {};
+    if (existingStagePayment.status === 'Paid') {
+      return res.status(400).json({ success: false, message: `${config.payeeRole} payment already completed` });
+    }
+
+    const defaultAmount = Number(existingStagePayment.amount || batch.price || (batch.quantity || 0) * 10 || 0);
+    const payableAmount = Number(amount || defaultAmount);
+    if (!Number.isFinite(payableAmount) || payableAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Payment amount must be greater than 0' });
+    }
+
+    const razorpay = getRazorpayClient();
+    const isMockOrder = !razorpay;
+    let order;
+    if (razorpay) {
+      order = await razorpay.orders.create({
+        amount: Math.round(payableAmount * 100),
+        currency: 'INR',
+        receipt: `${batchId}-${normalizedStage}-${Date.now()}`,
+        notes: {
+          batchId,
+          stage: normalizedStage,
+          payerRole: payer.role,
+          payeeRole: config.payeeRole,
+        },
+      });
+    } else {
+      order = {
+        id: `order_mock_${Date.now()}`,
+        amount: Math.round(payableAmount * 100),
+        currency: 'INR',
+      };
+    }
+
+    batch.payments = batch.payments || {};
+    batch.payments[normalizedStage] = {
+      ...existingStagePayment,
+      status: 'Order Created',
+      amount: payableAmount,
+      orderId: order.id,
+      paidBy: payer._id,
+      paidTo: recipient._id,
+    };
+    batch.markModified('payments');
+    await batch.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment order created',
+      data: {
+        order,
+        key: process.env.RAZORPAY_KEY_ID || 'rzp_test_mock',
+        isMockOrder,
+        paymentMode: isMockOrder ? 'Mock Payment' : 'Razorpay',
+        batchId,
+        stage: normalizedStage,
+        amount: payableAmount,
+        payee: {
+          name: recipient.name,
+          role: recipient.role,
+          walletAddress: recipient.walletAddress,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Create payment order error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to create payment order', error: error.message });
+  }
+};
+
+/**
+ * @desc    Verify and capture payment status
+ * @route   POST /api/batch/payment/verify
+ * @access  Private (Distributor, Retailer)
+ */
+exports.verifyPayment = async (req, res) => {
+  try {
+    const { batchId, stage, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const payer = req.user;
+
+    if (!batchId || !stage || !razorpay_order_id) {
+      return res.status(400).json({ success: false, message: 'batchId, stage and razorpay_order_id are required' });
+    }
+
+    const normalizedStage = String(stage).toLowerCase();
+    const config = PAYMENT_STAGE_CONFIG[normalizedStage];
+    if (!config) {
+      return res.status(400).json({ success: false, message: 'Invalid payment stage' });
+    }
+
+    if (!config.payerRoles.includes(payer.role)) {
+      return res.status(403).json({ success: false, message: `${payer.role} cannot verify ${normalizedStage} payment` });
+    }
+
+    const batch = await Batch.findOne({ batchId });
+    if (!batch) {
+      return res.status(404).json({ success: false, message: 'Batch not found' });
+    }
+
+    const stagePayment = batch.payments?.[normalizedStage];
+    if (!stagePayment || stagePayment.orderId !== razorpay_order_id) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired payment order' });
+    }
+
+    if (stagePayment.status === 'Paid') {
+      return res.status(400).json({ success: false, message: 'Payment already verified' });
+    }
+
+    const hasLiveRazorpay = Boolean(process.env.RAZORPAY_KEY_SECRET && razorpay_signature && razorpay_payment_id);
+    const paymentMethod = hasLiveRazorpay ? 'Razorpay' : 'Mock Payment';
+    if (hasLiveRazorpay) {
+      const expected = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest('hex');
+
+      if (expected !== razorpay_signature) {
+        return res.status(400).json({ success: false, message: 'Payment signature verification failed' });
+      }
+    }
+
+    const paidAt = new Date();
+    batch.payments[normalizedStage] = {
+      ...stagePayment,
+      status: 'Paid',
+      paymentId: razorpay_payment_id || `pay_mock_${Date.now()}`,
+      signature: razorpay_signature || 'mock_signature',
+      paidBy: payer._id,
+      paidAt,
+      paymentMethod,
+    };
+
+    batch.paymentHistory = batch.paymentHistory || [];
+    batch.paymentHistory.push({
+      stage: normalizedStage,
+      amount: Number(stagePayment.amount || 0),
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id || `pay_mock_${Date.now()}`,
+      signature: razorpay_signature || 'mock_signature',
+      paidBy: payer._id,
+      paidByRole: payer.role,
+      paidTo: stagePayment.paidTo,
+      paidToRole: config.payeeRole,
+      paymentMethod,
+      paidAt,
+    });
+
+    const statusMessageMap = {
+      farmer: 'Payment completed from Distributor to Farmer',
+      transport: 'Payment completed from Distributor to Transporter',
+      distributor: 'Payment completed from Retailer to Distributor',
+    };
+
+    if (normalizedStage === 'distributor') {
+      batch.status = 'Completed';
+    }
+
+    batch.statusHistory.push({
+      status: batch.status,
+      message: statusMessageMap[normalizedStage],
+      updatedBy: payer._id,
+    });
+
+    batch.markModified('payments');
+    await batch.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment verified successfully',
+      data: {
+        batchId,
+        stage: normalizedStage,
+        payment: batch.payments[normalizedStage],
+      },
+    });
+  } catch (error) {
+    console.error('Verify payment error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to verify payment', error: error.message });
+  }
+};
+
+/**
+ * @desc    Get payment history for current user
+ * @route   GET /api/batch/payment/history
+ * @access  Private
+ */
+exports.getPaymentHistory = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const batches = await Batch.find({
+      $or: [{ 'paymentHistory.paidBy': userId }, { 'paymentHistory.paidTo': userId }, { farmer: userId }],
+    })
+      .select('batchId productName paymentHistory payments price quantity unit')
+      .populate('paymentHistory.paidBy', 'name role')
+      .populate('paymentHistory.paidTo', 'name role')
+      .sort({ updatedAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: batches.length,
+      data: batches,
+    });
+  } catch (error) {
+    console.error('Get payment history error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get payment history', error: error.message });
   }
 };

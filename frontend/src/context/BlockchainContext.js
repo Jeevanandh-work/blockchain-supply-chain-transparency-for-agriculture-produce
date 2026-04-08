@@ -142,6 +142,29 @@ export const BlockchainProvider = ({ children }) => {
     }
   };
 
+  const getTransportAssignment = async (batchId) => {
+    try {
+      if (!contract) {
+        throw new Error('Contract not initialized');
+      }
+
+      if (typeof contract.getTransportAssignment !== 'function') {
+        return null;
+      }
+
+      const assignment = await contract.getTransportAssignment(batchId);
+      return {
+        transporterAddress: assignment[0],
+        assignedBy: assignment[1],
+        assignedAt: Number(assignment[2]),
+        exists: assignment[3],
+      };
+    } catch (error) {
+      console.error('Get transport assignment error:', error);
+      throw error;
+    }
+  };
+
   const value = {
     provider,
     contract,
@@ -152,6 +175,7 @@ export const BlockchainProvider = ({ children }) => {
     getBatch,
     getBatchHistory,
     getQualityRecords,
+    getTransportAssignment,
   };
 
   return (

@@ -25,15 +25,19 @@ blockchainService.initialize().catch(console.error);
 // Middleware
 app.use(helmet()); // Security headers
 app.use(cors()); // Enable CORS
-app.use(express.json()); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
+app.use(express.json({ limit: '20mb' })); // Parse JSON bodies (supports base64 image proof uploads)
+app.use(express.urlencoded({ extended: true, limit: '20mb' })); // Parse URL-encoded bodies
 app.use(morgan('dev')); // Logging
 
-// Rate limiting
+// Rate limiting (relaxed in development to support dashboard polling)
+const isDevelopment = (process.env.NODE_ENV || 'development') === 'development';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: isDevelopment ? 2000 : 100,
   message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => isDevelopment && req.path === '/health',
 });
 app.use('/api/', limiter);
 

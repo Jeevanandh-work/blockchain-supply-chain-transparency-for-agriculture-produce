@@ -152,6 +152,7 @@ exports.getMe = async (req, res) => {
           role: user.role,
           phoneNumber: user.phoneNumber,
           organization: user.organization,
+          farmerProfile: user.farmerProfile,
           createdAt: user.createdAt,
         },
       },

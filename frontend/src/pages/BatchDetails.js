@@ -102,6 +102,32 @@ const BatchDetails = () => {
     },
   ];
 
+  const distributorEvent = [...(batchData.statusHistory || [])]
+    .reverse()
+    .find((entry) => entry?.updatedBy?.role === 'Distributor');
+
+  const transportEvent = [...(batchData.statusHistory || [])]
+    .reverse()
+    .find((entry) => entry?.updatedBy?.role === 'Transport');
+
+  const deliveredEvent = [...(batchData.statusHistory || [])]
+    .reverse()
+    .find((entry) => String(entry?.status || '').toLowerCase().includes('delivered'));
+
+  const distributorInfo = {
+    name: distributorEvent?.updatedBy?.name || 'Distributor Partner',
+    organization: distributorEvent?.updatedBy?.organization || 'AgriChain Network',
+    phone: distributorEvent?.updatedBy?.phoneNumber || 'Not shared',
+  };
+
+  const transportInfo = {
+    vehicleNumber: batchData?.transportDetails?.vehicleNumber || 'Assigned Vehicle',
+    driverName: batchData?.transportDetails?.driverName || transportEvent?.updatedBy?.name || 'Assigned Driver',
+    company: batchData?.transportDetails?.transportCompany || transportEvent?.updatedBy?.organization || 'Assigned Transport Partner',
+  };
+
+  const deliveredOn = batchData?.deliveryProof?.deliveredAt || batchData?.deliveredAt || deliveredEvent?.timestamp || null;
+
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4">
       <div className="max-w-5xl mx-auto">
@@ -181,6 +207,16 @@ const BatchDetails = () => {
               </div>
 
               <div className="flex items-start space-x-3">
+                <Clock className="w-6 h-6 text-primary-600 mt-1" />
+                <div>
+                  <p className="text-sm text-gray-500">Delivered On</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {deliveredOn ? new Date(deliveredOn).toLocaleDateString() : 'Not delivered yet'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3">
                 <Shield className="w-6 h-6 text-primary-600 mt-1" />
                 <div>
                   <p className="text-sm text-gray-500">Current Status</p>
@@ -198,6 +234,26 @@ const BatchDetails = () => {
                     {batchData.currentOwner?.name || 'N/A'}
                   </p>
                   <p className="text-sm text-gray-600">{batchData.currentOwnerRole}</p>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <User className="w-6 h-6 text-primary-600 mt-1" />
+                <div>
+                  <p className="text-sm text-gray-500">Distributor</p>
+                  <p className="text-lg font-semibold text-gray-900">{distributorInfo.name}</p>
+                  <p className="text-sm text-gray-600">{distributorInfo.organization}</p>
+                  <p className="text-xs text-gray-500">Phone: {distributorInfo.phone}</p>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <Package className="w-6 h-6 text-primary-600 mt-1" />
+                <div>
+                  <p className="text-sm text-gray-500">Transport</p>
+                  <p className="text-lg font-semibold text-gray-900">{transportInfo.driverName}</p>
+                  <p className="text-sm text-gray-600">{transportInfo.company}</p>
+                  <p className="text-xs text-gray-500">Vehicle: {transportInfo.vehicleNumber}</p>
                 </div>
               </div>
             </div>

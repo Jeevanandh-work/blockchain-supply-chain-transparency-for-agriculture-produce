@@ -41,6 +41,105 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    farmerProfile: {
+      fullName: {
+        type: String,
+        trim: true,
+      },
+      mobileNumber: {
+        type: String,
+        trim: true,
+      },
+      aadhaarNumber: {
+        type: String,
+        trim: true,
+      },
+      licenseNumber: {
+        type: String,
+        trim: true,
+      },
+      issuingAuthority: {
+        type: String,
+        trim: true,
+      },
+      issueDate: {
+        type: Date,
+      },
+      expiryDate: {
+        type: Date,
+      },
+      farmLocation: {
+        type: String,
+        trim: true,
+      },
+      landArea: {
+        type: String,
+        trim: true,
+      },
+      cropType: {
+        type: String,
+        trim: true,
+      },
+      licenseDocument: {
+        fileName: String,
+        fileType: String,
+        fileData: String,
+      },
+      idProofDocument: {
+        fileName: String,
+        fileType: String,
+        fileData: String,
+      },
+      licenseStatus: {
+        type: String,
+        enum: ['Pending', 'Verified', 'Rejected'],
+        default: 'Pending',
+      },
+      profileCompleted: {
+        type: Boolean,
+        default: false,
+      },
+      completionPercentage: {
+        type: Number,
+        default: 0,
+      },
+    },
+    distributorProfile: {
+      role: {
+        type: String,
+        default: 'Distributor',
+      },
+      organizationName: {
+        type: String,
+        trim: true,
+      },
+      licenseNumber: {
+        type: String,
+        trim: true,
+      },
+      issuingAuthority: {
+        type: String,
+        trim: true,
+      },
+      profilePhoto: {
+        fileName: String,
+        fileType: String,
+        fileData: String,
+      },
+      licenseDocument: {
+        fileName: String,
+        fileType: String,
+        fileData: String,
+      },
+      profileCompleted: {
+        type: Boolean,
+        default: false,
+      },
+      completionPercentage: {
+        type: Number,
+        default: 0,
+      },
+    },
     isActive: {
       type: Boolean,
       default: true,

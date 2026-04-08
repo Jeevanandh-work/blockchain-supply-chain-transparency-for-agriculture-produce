@@ -12,6 +12,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
   ShoppingBag,
   Search,
@@ -39,6 +40,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import { batchAPI } from '../../services/api';
 
 const ConsumerDashboard = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [batch, setBatch] = useState(null);
@@ -179,7 +181,11 @@ const ConsumerDashboard = () => {
               </div>
 
               <div className="text-center">
-                <button className="inline-flex items-center space-x-2 text-green-600 hover:text-green-700 font-medium">
+                <button
+                  type="button"
+                  onClick={() => navigate('/scan')}
+                  className="inline-flex items-center space-x-2 text-green-600 hover:text-green-700 font-medium"
+                >
                   <QrCode className="w-5 h-5" />
                   <span>Or scan QR code</span>
                 </button>

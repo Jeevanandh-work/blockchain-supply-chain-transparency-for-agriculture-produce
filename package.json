@@ -19,6 +19,7 @@
     "test:contracts": "cd blockchain && npx hardhat test",
     "test:backend": "cd backend && npm test",
     "test:frontend": "cd frontend && npm test",
+    "test:payment-flow": "powershell -ExecutionPolicy Bypass -File ./scripts/run-payment-flow-test.ps1",
     "test:all": "npm run test:contracts && npm run test:backend && npm run test:frontend",
     "verify-integration": "node scripts/verify-blockchain-integration.js",
     "compile": "cd blockchain && npx hardhat compile",

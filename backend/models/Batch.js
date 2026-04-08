@@ -18,6 +18,16 @@ const batchSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    price: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    quantitySold: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     unit: {
       type: String,
       required: true,
@@ -52,12 +62,199 @@ const batchSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Created', 'Picked Up', 'In Transit', 'Reached Destination', 'Delivered', 'Completed'],
+      enum: [
+        'Created', 
+        'Picked Up', 
+        'Picked from Farmer',
+        'In Transit', 
+        'Reached Destination',
+        'Delivered to Processor',
+        'Delivered to Retailer',
+        'Accepted by Retailer',
+        'Rejected by Retailer',
+        'Delivered',
+        'Final Delivery',
+        'Completed'
+      ],
       default: 'Created',
     },
     location: {
       type: String,
       default: '',
+    },
+    deliveryAddress: {
+      type: String,
+      default: '',
+    },
+    transportDetails: {
+      vehicleNumber: {
+        type: String,
+        default: '',
+      },
+      driverName: {
+        type: String,
+        default: '',
+      },
+      transportCompany: {
+        type: String,
+        default: '',
+      },
+      contactNumber: {
+        type: String,
+        default: '',
+      },
+    },
+    payments: {
+      farmer: {
+        status: {
+          type: String,
+          enum: ['Pending', 'Order Created', 'Paid'],
+          default: 'Pending',
+        },
+        amount: {
+          type: Number,
+          default: 0,
+        },
+        orderId: {
+          type: String,
+          default: '',
+        },
+        paymentId: {
+          type: String,
+          default: '',
+        },
+        signature: {
+          type: String,
+          default: '',
+        },
+        paidBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidTo: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidAt: {
+          type: Date,
+        },
+        paymentMethod: {
+          type: String,
+          default: '',
+        },
+      },
+      transport: {
+        status: {
+          type: String,
+          enum: ['Pending', 'Order Created', 'Paid'],
+          default: 'Pending',
+        },
+        amount: {
+          type: Number,
+          default: 0,
+        },
+        orderId: {
+          type: String,
+          default: '',
+        },
+        paymentId: {
+          type: String,
+          default: '',
+        },
+        signature: {
+          type: String,
+          default: '',
+        },
+        paidBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidTo: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidAt: {
+          type: Date,
+        },
+        paymentMethod: {
+          type: String,
+          default: '',
+        },
+      },
+      distributor: {
+        status: {
+          type: String,
+          enum: ['Pending', 'Order Created', 'Paid'],
+          default: 'Pending',
+        },
+        amount: {
+          type: Number,
+          default: 0,
+        },
+        orderId: {
+          type: String,
+          default: '',
+        },
+        paymentId: {
+          type: String,
+          default: '',
+        },
+        signature: {
+          type: String,
+          default: '',
+        },
+        paidBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidTo: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidAt: {
+          type: Date,
+        },
+        paymentMethod: {
+          type: String,
+          default: '',
+        },
+      },
+    },
+    paymentHistory: [
+      {
+        stage: {
+          type: String,
+          enum: ['farmer', 'transport', 'distributor'],
+        },
+        amount: Number,
+        orderId: String,
+        paymentId: String,
+        signature: String,
+        paidBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidByRole: String,
+        paidTo: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        paidToRole: String,
+        paymentMethod: {
+          type: String,
+          default: '',
+        },
+        paidAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    dispatchTime: {
+      type: Date,
+    },
+    expectedDelivery: {
+      type: Date,
     },
     gpsTracking: [
       {
